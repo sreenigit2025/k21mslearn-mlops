@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # setup-mlops-envs.sh
 # Complete provisioning script for the "Plan and prepare an MLOps solution" lab.
 # Creates a dev workspace, a prod workspace, and a shared Azure ML registry,
@@ -7,9 +8,7 @@
 # ---------------------------------------------------------------------------
 # Shared variables
 # ---------------------------------------------------------------------------
-guid=$(cat /proc/sys/kernel/random/uuid)
-suffix=${guid//[-]/}
-suffix=${suffix:0:18}
+suffix="$(date +%s)$(printf '%04x%04x' "$RANDOM" "$RANDOM")"
 
 RESOURCE_PROVIDER="Microsoft.MachineLearningServices"
 REGIONS=("eastus" "westus" "centralus" "northeurope" "westeurope")
@@ -49,7 +48,7 @@ az ml workspace create --name $DEV_WORKSPACE_NAME --resource-group $DEV_RESOURCE
 az configure --defaults group=$DEV_RESOURCE_GROUP workspace=$DEV_WORKSPACE_NAME
 
 echo "Creating compute instance for dev workspace..."
-az ml compute create --name $COMPUTE_INSTANCE --size STANDARD_DS11_V2 --type ComputeInstance
+az ml compute create --name "$COMPUTE_INSTANCE" --size STANDARD_DS11_V2 --type ComputeInstance
 
 echo "Creating compute cluster for dev workspace..."
 az ml compute create --name $COMPUTE_CLUSTER --size STANDARD_DS11_V2 --max-instances 2 --type AmlCompute
