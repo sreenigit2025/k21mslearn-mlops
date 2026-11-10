@@ -54,6 +54,7 @@ jobs:
         id: train
         run: |
           JOB_NAME="diabetes-train-prod-${{ github.run_id }}"
+          echo "job_name=$JOB_NAME" >> "$GITHUB_OUTPUT"
           echo "Running Azure ML job in prod: $JOB_NAME"
           az ml job create \
             -f src/job.yml \
@@ -63,20 +64,26 @@ jobs:
 
       - name: Extract prod metrics from logs
         id: parse-metrics
+        env:
+          JOB_NAME: ${{ steps.train.outputs.job_name }}
         run: |
-          if [ ! -f training_output.log ]; then
-            echo "No training_output.log found to parse metrics." >&2
-            exit 1
-          fi
+          # Log streaming (--stream) can fail with a storage AuthenticationFailed
+          # error, leaving training_output.log without the script output. Download
+          # the job's std_log.txt after completion and parse that instead.
+          az ml job download --name "$JOB_NAME" --all --download-path job_output >/dev/null || true
+          LOG_FILES=$(find job_output -name 'std_log*.txt' 2>/dev/null)
+          [ -f training_output.log ] && LOG_FILES="$LOG_FILES training_output.log"
 
-          ACC=$(grep -o "Accuracy: .*" training_output.log | tail -n 1 | awk '{print $2}') || true
-          AUC=$(grep -o "AUC: .*" training_output.log | tail -n 1 | awk '{print $2}') || true
+          ACC=$(cat $LOG_FILES 2>/dev/null | grep -oE "^Accuracy:? [0-9.]+" | tail -n 1 | awk '{print $2}') || true
+          AUC=$(cat $LOG_FILES 2>/dev/null | grep -oE "^AUC:? [0-9.]+" | tail -n 1 | awk '{print $2}') || true
+          STUDIO_URL=$(az ml job show --name "$JOB_NAME" --query services.Studio.endpoint -o tsv 2>/dev/null) || true
 
           echo "Prod accuracy: $ACC"
           echo "Prod AUC: $AUC"
 
           echo "prod_accuracy=$ACC" >> "$GITHUB_OUTPUT"
           echo "prod_auc=$AUC" >> "$GITHUB_OUTPUT"
+          echo "studio_url=$STUDIO_URL" >> "$GITHUB_OUTPUT"
 
       - name: Comment prod metrics on pull request
         uses: actions/github-script@v7
@@ -84,10 +91,15 @@ jobs:
           script: |
             const acc = '${{ steps.parse-metrics.outputs.prod_accuracy }}';
             const auc = '${{ steps.parse-metrics.outputs.prod_auc }}';
+            const jobName = '${{ steps.train.outputs.job_name }}';
+            const studioUrl = '${{ steps.parse-metrics.outputs.studio_url }}';
 
             const prNumber = context.issue.number;
 
             let body = '✅ Prod training workflow completed.';
+            body += '\n\n**Azure ML job**';
+            body += `\n- Name: ${jobName}`;
+            if (studioUrl) body += `\n- Studio: ${studioUrl}`;
             if (acc || auc) {
               body += '\n\n**Prod evaluation metrics**';
               if (acc) body += `\n- Accuracy: ${acc}`;
