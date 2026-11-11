@@ -70,8 +70,18 @@ jobs:
           # Log streaming (--stream) can fail with a storage AuthenticationFailed
           # error, leaving training_output.log without the script output. Download
           # the job's std_log.txt after completion and parse that instead.
+          # The stream can end while the job is still Finalizing, and download is
+          # only allowed once it reaches a terminal state, so wait (up to 10 min).
+          for i in $(seq 1 60); do
+            STATUS=$(az ml job show --name "$JOB_NAME" --query status -o tsv 2>/dev/null) || true
+            case "$STATUS" in Completed|Failed|Canceled|NotResponding|Paused) break ;; esac
+            echo "Job status: ${STATUS:-unknown}; waiting..."
+            sleep 10
+          done
+          echo "Job status: $STATUS"
+
           az ml job download --name "$JOB_NAME" --all --download-path job_output >/dev/null || true
-          LOG_FILES=$(find job_output -name 'std_log*.txt' 2>/dev/null)
+          LOG_FILES=$(find job_output -name 'std_log*.txt' 2>/dev/null) || true
           [ -f training_output.log ] && LOG_FILES="$LOG_FILES training_output.log"
 
           ACC=$(cat $LOG_FILES 2>/dev/null | grep -oE "^Accuracy:? [0-9.]+" | tail -n 1 | awk '{print $2}') || true
