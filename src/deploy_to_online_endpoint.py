@@ -35,7 +35,9 @@ def ensure_endpoint(ml_client: MLClient, endpoint_name: str) -> ManagedOnlineEnd
         return endpoint
     except Exception:
         unique_suffix = datetime.datetime.now().strftime("%m%d%H%M%f")
-        name = endpoint_name or f"endpoint-{unique_suffix}"
+        # Endpoint names must be unique across the Azure region, so always
+        # append the timestamp suffix (Azure allows at most 32 characters).
+        name = f"{endpoint_name or 'endpoint'}-{unique_suffix}"[:32]
 
         endpoint = ManagedOnlineEndpoint(
             name=name,
